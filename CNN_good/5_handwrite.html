@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手寫數字即時辨識 (CNN)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        #canvas {
+            border: 1px solid black;
+            cursor: crosshair;
+        }
+        #output {
+            margin-top: 10px;
+            font-size: 18px;
+        }
+        #chartCanvas {
+            margin-top: 20px;
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>手寫數字即時辨識 (CNN)</h1>
+    <p>在下面的畫布中用滑鼠寫一個數字，完成後自動辨識。</p>
+    <canvas id="canvas" width="280" height="280"></canvas>
+    <br>
+    <button id="clearButton">清除</button>
+    <div id="output"></div>
+    <canvas id="chartCanvas" width="500" height="200"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const clearButton = document.getElementById('clearButton');
+        const outputDiv = document.getElementById('output');
+        const chartCanvas = document.getElementById('chartCanvas');
+        const chartCtx = chartCanvas.getContext('2d');
+        let isDrawing = false;
+        let debounceTimer;
+
+        // 畫布初始化
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.lineWidth = 15;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'white';
+
+        // 滑鼠事件
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            ctx.beginPath();
+            ctx.moveTo(e.offsetX, e.offsetY);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDrawing) {
+                ctx.lineTo(e.offsetX, e.offsetY);
+                ctx.stroke();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDrawing = false;
+            triggerPrediction();
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDrawing = false;
+        });
+
+        // 清除畫布
+        clearButton.addEventListener('click', () => {
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            chartCtx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
+            outputDiv.textContent = '';
+        });
+
+        // 將畫布轉換為 28x28x1 張量
+        function preprocessCanvas() {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 28;
+            tempCanvas.height = 28;
+
+            // 將畫布縮小到 28x28
+            tempCtx.drawImage(canvas, 0, 0, 28, 28);
+
+            // 獲取像素數據並轉換為灰階
+            const imageData = tempCtx.getImageData(0, 0, 28, 28);
+            const data = imageData.data;
+            const grayscaleData = [];
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const grayscale = (r + g + b) / 3; // 將 RGB 轉換為灰階
+                grayscaleData.push(grayscale / 255); // 正規化到 [0, 1]
+            }
+
+            // 轉換為 TensorFlow 張量
+            const tensor = tf.tensor4d(grayscaleData, [1, 28, 28, 1]);
+            return tensor;
+        }
+
+        // 加載模型
+        let model;
+        async function loadModel() {
+            model = await tf.loadGraphModel('tfjs_graph_model/model.json');
+            outputDiv.textContent = '模型已加載完成！';
+        }
+
+        // 繪製長條圖
+        function drawChart(probabilities) {
+            chartCtx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
+
+            const barWidth = 40;
+            const barSpacing = 10;
+            const chartHeight = chartCanvas.height;
+            const chartWidth = chartCanvas.width;
+
+            probabilities.forEach((prob, index) => {
+                const barHeight = prob * chartHeight;
+                chartCtx.fillStyle = 'blue';
+                chartCtx.fillRect(
+                    index * (barWidth + barSpacing),
+                    chartHeight - barHeight,
+                    barWidth,
+                    barHeight
+                );
+                chartCtx.fillStyle = 'black';
+                chartCtx.fillText(
+                    `${index}`,
+                    index * (barWidth + barSpacing) + barWidth / 4,
+                    chartHeight - 5
+                );
+            });
+        }
+
+        // 即時預測
+        async function triggerPrediction() {
+            if (!model) {
+                outputDiv.textContent = '模型尚未加載完成！請稍候。';
+                return;
+            }
+
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+
+            debounceTimer = setTimeout(async () => {
+                const inputTensor = preprocessCanvas();
+                const prediction = model.predict(inputTensor);
+                const probabilities = prediction.arraySync()[0];
+                const predictedDigit = probabilities.indexOf(Math.max(...probabilities));
+
+                // 顯示結果
+                /*
+                outputDiv.innerHTML = `<strong>辨識結果:</strong> ${predictedDigit}<br>`;
+                probabilities.forEach((prob, index) => {
+                    outputDiv.innerHTML += `數字 ${index}: ${(prob * 100).toFixed(2)}%<br>`;
+                });
+                */
+
+                // 繪製長條圖
+                drawChart(probabilities);
+            }, 300); // 300ms 的防抖處理
+        }
+
+        // 初始化
+        loadModel();
+    </script>
+</body>
+</html>
